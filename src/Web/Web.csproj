@@ -16,6 +16,7 @@
     <PackageReference Include="Ardalis.ListStartupServices" />
     <PackageReference Include="Ardalis.Specification" />
     <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" />
+    <PackageReference Include="Azure.Messaging.ServiceBus" />
     <PackageReference Include="MediatR" />
     <PackageReference Include="BuildBundlerMinifier" Condition="'$(Configuration)'=='Release'" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />

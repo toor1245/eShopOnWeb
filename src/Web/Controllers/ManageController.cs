@@ -480,6 +480,7 @@ public class ManageController : Controller
 
         var model = new ShowRecoveryCodesViewModel { RecoveryCodes = recoveryCodes.ToArray() };
 
+        
         return View(nameof(ShowRecoveryCodes), model);
     }
 

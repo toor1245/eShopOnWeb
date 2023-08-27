@@ -1,5 +1,8 @@
-﻿using System.Text.Json;
+using System.Text.Json;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Ardalis.GuardClauses;
+using Azure.Messaging.ServiceBus;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -9,6 +12,7 @@ using Microsoft.eShopWeb.ApplicationCore.Exceptions;
 using Microsoft.eShopWeb.ApplicationCore.Interfaces;
 using Microsoft.eShopWeb.Infrastructure.Identity;
 using Microsoft.eShopWeb.Web.AzureFeatures.OrderDeliveryProcessor;
+using Microsoft.eShopWeb.Web.AzureFeatures.OrderReserve;
 using Microsoft.eShopWeb.Web.Interfaces;
 
 namespace Microsoft.eShopWeb.Web.Pages.Basket;
@@ -56,6 +60,7 @@ public class CheckoutModel : PageModel
 
             var updateModel = items.ToDictionary(b => b.Id.ToString(), b => b.Quantity);
             await _basketService.SetQuantities(BasketModel.Id, updateModel);
+            
             var order = await _orderService.CreateOrderAsync(BasketModel.Id,
                 new Address("123 Main St.", "Kent", "OH", "United States", "44240"));
             await _basketService.DeleteBasketAsync(BasketModel.Id);
@@ -67,11 +72,29 @@ public class CheckoutModel : PageModel
                 Items = order.OrderItems.Select(x => x.Id).ToList()
             };
 
+            using var httpClientOrderDelivery = new HttpClient();
+            StringContent contentOrderDelivery = new StringContent(JsonSerializer.Serialize(orderDelivery));
+            var responseMessageOrderDelivery = await httpClientOrderDelivery
+                .PostAsync(Environment.GetEnvironmentVariable("OrderDeliveryProcessorUrl"), contentOrderDelivery);
+            responseMessageOrderDelivery.EnsureSuccessStatusCode();
+
+            OrderReserve orderReserve = new();
             using var httpClient = new HttpClient();
-            StringContent content = new StringContent(JsonSerializer.Serialize(orderDelivery));
-            var responseMessage =
-                await httpClient.PostAsync(Environment.GetEnvironmentVariable("OrderDeliveryProcessorUrl"), content);
-            responseMessage.EnsureSuccessStatusCode();
+
+            var orderReserveItems = order.OrderItems.Select(x => new OrderReserveItem
+            {
+                Id = x.Id,
+                Quantity = x.Units
+            }).ToList();
+
+            orderReserve.OrderReserveItems.AddRange(orderReserveItems);
+
+            string? connectionString = Environment.GetEnvironmentVariable("AZURE_SERVICE_BUS_CONNECTION");
+
+            await using var client = new ServiceBusClient(connectionString);
+            ServiceBusSender sender = client.CreateSender(Environment.GetEnvironmentVariable("AZURE_SERVICE_BUS_QUEUE_NAME"));
+            ServiceBusMessage message = new ServiceBusMessage(JsonSerializer.Serialize(orderReserve));
+            await sender.SendMessageAsync(message);
         }
         catch (EmptyBasketOnCheckoutException emptyBasketOnCheckoutException)
         {
