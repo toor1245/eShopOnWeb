@@ -1,4 +1,5 @@
-﻿using Ardalis.GuardClauses;
+﻿using System.Text.Json;
+using Ardalis.GuardClauses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -7,6 +8,7 @@ using Microsoft.eShopWeb.ApplicationCore.Entities.OrderAggregate;
 using Microsoft.eShopWeb.ApplicationCore.Exceptions;
 using Microsoft.eShopWeb.ApplicationCore.Interfaces;
 using Microsoft.eShopWeb.Infrastructure.Identity;
+using Microsoft.eShopWeb.Web.AzureFeatures.OrderDeliveryProcessor;
 using Microsoft.eShopWeb.Web.Interfaces;
 
 namespace Microsoft.eShopWeb.Web.Pages.Basket;
@@ -54,13 +56,32 @@ public class CheckoutModel : PageModel
 
             var updateModel = items.ToDictionary(b => b.Id.ToString(), b => b.Quantity);
             await _basketService.SetQuantities(BasketModel.Id, updateModel);
-            await _orderService.CreateOrderAsync(BasketModel.Id, new Address("123 Main St.", "Kent", "OH", "United States", "44240"));
+            var order = await _orderService.CreateOrderAsync(BasketModel.Id,
+                new Address("123 Main St.", "Kent", "OH", "United States", "44240"));
             await _basketService.DeleteBasketAsync(BasketModel.Id);
+
+            var orderDelivery = new OrderDelivery
+            {
+                ShippingAddress = order.ShipToAddress,
+                FinalPrice = order.Total(),
+                Items = order.OrderItems.Select(x => x.Id).ToList()
+            };
+
+            using var httpClient = new HttpClient();
+            StringContent content = new StringContent(JsonSerializer.Serialize(orderDelivery));
+            var responseMessage =
+                await httpClient.PostAsync(Environment.GetEnvironmentVariable("OrderDeliveryProcessorUrl"), content);
+            responseMessage.EnsureSuccessStatusCode();
         }
         catch (EmptyBasketOnCheckoutException emptyBasketOnCheckoutException)
         {
             //Redirect to Empty Basket page
             _logger.LogWarning(emptyBasketOnCheckoutException.Message);
+            return RedirectToPage("/Basket/Index");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex.Message);
             return RedirectToPage("/Basket/Index");
         }
 
